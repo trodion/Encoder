@@ -18,10 +18,13 @@ void EXTI9_5_IRQHandler(void) {
 }
 
 void TIM4_IRQHandler(void) {
+    uint8_t cur_cnt = TIM4->CNT;
+    
     if (TIM4->SR & TIM_SR_TIF) {
-        send_byte(TIM4->CNT);
-        GPIOC->ODR ^= GPIO_ODR_ODR9;
-        TIM3->CCR3 = (TIM4->CNT >> 1);
+        send_byte(cur_cnt);
+        if (cur_cnt >= 0 && cur_cnt <= 4) cur_cnt = 0;
+        if (cur_cnt >= 13 || cur_cnt <= 26) cur_cnt <<= 1;
+        TIM3->CCR3 = (cur_cnt == 1 ? 0 : cur_cnt);
         msDelay(150);
         // Сбросить флаг прерывания
         TIM4->SR &= ~TIM_SR_TIF;
@@ -91,7 +94,7 @@ void init_NVIC() {
 }
 
 void init_TIM3() {
-    TIM3->ARR = 100;
+    TIM3->ARR = 60;
     TIM3->CCR3 = 0;
     TIM3->CCER |= TIM_CCER_CC3E; // включение выхода канала 3
     TIM3->CCMR2 |= TIM_CCMR2_OC3M_2 | TIM_CCMR2_OC3M_1; // режим 2 PWM
