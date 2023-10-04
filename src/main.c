@@ -4,68 +4,65 @@ void init_pin();
 void init_NVIC();
 void msDelay(int ms);
 void init_TIM3();
+void init_TIM4();
 void init_UART();
 void send_byte(uint8_t byte);
 
 void EXTI9_5_IRQHandler(void) {
     if (EXTI->PR & EXTI_PR_PR5){
         /* Прерывание от PC5 - SW */
-        GPIOC->ODR ^= GPIO_ODR_ODR8;
+        GPIOC->ODR ^= GPIO_ODR_ODR9;
         msDelay(500);
         EXTI->PR |= EXTI_PR_PR5;
     }
 }
 
-void TIM3_IRQHandler(void) {
-    if (TIM3->SR & TIM_SR_TIF) {
-        send_byte(TIM3->CNT);
-        if (TIM3->CNT <= 18) {
-            GPIOC->ODR |= GPIO_ODR_ODR8;
-            GPIOC->ODR &= ~GPIO_ODR_ODR9;
-        }
-        else {
-            GPIOC->ODR &= ~GPIO_ODR_ODR8;
-            GPIOC->ODR |= GPIO_ODR_ODR9;
-        }
-        msDelay(1000);
+void TIM4_IRQHandler(void) {
+    if (TIM4->SR & TIM_SR_TIF) {
+        send_byte(TIM4->CNT);
+        GPIOC->ODR ^= GPIO_ODR_ODR9;
+        TIM3->CCR3 = (TIM4->CNT >> 1);
+        msDelay(150);
         // Сбросить флаг прерывания
-        TIM3->SR &= ~TIM_SR_TIF;
+        TIM4->SR &= ~TIM_SR_TIF;
     }
 }
 
 int main() {
     RCC->APB2ENR |= RCC_APB2ENR_IOPAEN | RCC_APB2ENR_IOPBEN | RCC_APB2ENR_IOPCEN | RCC_APB2ENR_AFIOEN;
-    RCC->APB1ENR |= RCC_APB1ENR_TIM3EN | RCC_APB1ENR_USART3EN;
+    RCC->APB1ENR |= RCC_APB1ENR_TIM3EN | RCC_APB1ENR_TIM4EN | RCC_APB1ENR_USART3EN;
 
     init_pin();
     init_NVIC();
-    init_TIM3();
+    init_TIM3(); init_TIM4();
     init_UART();
     
     TIM3->CR1 |= TIM_CR1_CEN;
+    TIM4->CR1 |= TIM_CR1_CEN;
     
     while(1) {
     }
 }
 
 void init_pin() {
-    /* PC8 - BLUE LED */
-    GPIOC->CRH |= GPIO_CRH_MODE8_1 | GPIO_CRH_MODE8_0;
-    GPIOC->CRH &= ~GPIO_CRH_CNF8_1 & ~GPIO_CRH_CNF8_0;
+    /* PC8 - BLUE LED, TIM3_Ch3 */
+    GPIOC->CRH |= GPIO_CRH_CNF8_1 | GPIO_CRH_MODE8_1 | GPIO_CRH_MODE8_0;
+    GPIOC->CRH &= ~GPIO_CRH_CNF8_0;
+    AFIO->MAPR |= AFIO_MAPR_TIM3_REMAP;
 
     /* PC9 - GREEN LED */
     GPIOC->CRH |= GPIO_CRH_MODE9_1 | GPIO_CRH_MODE9_0;
     GPIOC->CRH &= ~GPIO_CRH_CNF9_1 & ~GPIO_CRH_CNF9_0;
     
-    /* PA6 - A, Input Pull-up */
-    GPIOA->CRL |= GPIO_CRL_CNF6_1;
-    GPIOA->CRL &= ~GPIO_CRL_CNF6_0 & ~GPIO_CRL_MODE6_1 & ~GPIO_CRL_MODE6_0;
-    GPIOA->ODR |= GPIO_ODR_ODR6;
+    /* PB6 - A, Input Pull-up */
+    GPIOB->CRL |= GPIO_CRL_CNF6_1;
+    GPIOB->CRL &= ~GPIO_CRL_CNF6_0 & ~GPIO_CRL_MODE6_1 & ~GPIO_CRL_MODE6_0;
+    GPIOB->ODR |= GPIO_ODR_ODR6;
 
-    /* PA7 - B, Input Pull-up */
-    GPIOA->CRL |= GPIO_CRL_CNF7_1;
-    GPIOA->CRL &= ~GPIO_CRL_CNF7_0 & ~GPIO_CRL_MODE7_1 & ~GPIO_CRL_MODE7_0;
-    GPIOA->ODR |= GPIO_ODR_ODR7;
+    /* PB7 - B, Input Pull-up */
+    GPIOB->CRL |= GPIO_CRL_CNF7_1;
+    GPIOB->CRL &= ~GPIO_CRL_CNF7_0 & ~GPIO_CRL_MODE7_1 & ~GPIO_CRL_MODE7_0;
+    GPIOB->ODR |= GPIO_ODR_ODR7;
     
     /* PC5 - SW, Input Pull-up */
     GPIOC->CRL |= GPIO_CRL_CNF5_1;
@@ -89,23 +86,30 @@ void init_NVIC() {
     NVIC_SetPriority(EXTI9_5_IRQn, 1);
     NVIC_EnableIRQ(EXTI9_5_IRQn);
     
-    NVIC_SetPriority(TIM3_IRQn, 0);
-    NVIC_EnableIRQ(TIM3_IRQn);
+    NVIC_SetPriority(TIM4_IRQn, 0);
+    NVIC_EnableIRQ(TIM4_IRQn);
 }
 
 void init_TIM3() {
+    TIM3->ARR = 100;
+    TIM3->CCR3 = 0;
+    TIM3->CCER |= TIM_CCER_CC3E; // включение выхода канала 3
+    TIM3->CCMR2 |= TIM_CCMR2_OC3M_2 | TIM_CCMR2_OC3M_1; // режим 2 PWM
+}
+
+void init_TIM4() {
     /* Конфигурирование каналов 1(PA6), 2(PA7) таймера 
      * 01 - канал на вход */
-    TIM3->CCMR1 |= TIM_CCMR1_CC1S_0 | TIM_CCMR1_CC2S_0;
-    TIM3->CCMR1 &= ~TIM_CCMR1_CC1S_1 & ~TIM_CCMR1_CC2S_1;
+    TIM4->CCMR1 |= TIM_CCMR1_CC1S_0 | TIM_CCMR1_CC2S_0;
+    TIM4->CCMR1 &= ~TIM_CCMR1_CC1S_1 & ~TIM_CCMR1_CC2S_1;
     /* Режим работы энкодера */
-    TIM3->SMCR |=  TIM_SMCR_SMS_1 | TIM_SMCR_SMS_0;
-    /* Для прерывыния необхрдимо сигнал TI1 снять триггером */
-    TIM3->SMCR |= TIM_SMCR_TS_2;
-    TIM3->DIER |= TIM_DIER_TIE;
+    TIM4->SMCR |=  TIM_SMCR_SMS_1 | TIM_SMCR_SMS_0;
+    /* Для прерывыния необходимо сигнал TI1 снять триггером */
+    TIM4->SMCR |= TIM_SMCR_TS_2;
+    TIM4->DIER |= TIM_DIER_TIE;
     
-    TIM3->ARR = 39;
-    TIM3->CNT = 0;
+    TIM4->ARR = 39;
+    TIM4->CNT = 0;
 }
 
 void init_UART() {
