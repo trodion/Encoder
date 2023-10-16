@@ -24,9 +24,23 @@ void EXTI0_IRQHandler() {
 }
 
 void TIM4_IRQHandler() {
-    TIM3->CCR3 = TIM4->CNT;
+    static uint8_t direction = 0; // Направление движения энкодера (0 - по часовой; 0xFF - против часовой)
+    static uint8_t prev = 70; // Предыдущее значение TIM3->CCR3 (т.е. подаваемого на DC-мотор напряжения)
+    uint8_t cur = TIM4->CNT; // Текущее напряжение на DC-моторе
+    
+    if (cur > 85){
+        TIM4->CNT = prev;
+        TIM4->SR &= ~TIM_SR_TIF;
+        return;
+    }
+    else if ((cur == 69 && prev == 70) || cur == prev) direction = ~direction;
+    
+    TIM3->CCR3 = cur;
+    prev = cur;
+
     send_byte(TIM3->CCR3);
-    GPIOC->ODR ^= GPIO_ODR_ODR9;
+    send_byte(direction);
+    //GPIOC->ODR ^= GPIO_ODR_ODR9;
     msDelay(150);
     // Сбросить флаг прерывания
     TIM4->SR &= ~TIM_SR_TIF;
@@ -47,7 +61,7 @@ int main(void) {
     START;
 
     while(1) {
-
+        
     }
     return 0;
 }
@@ -78,7 +92,7 @@ void init_pin() {
 }
 
 void init_NVIC() {
-        /* Разрешены прерывания от нулевой ноги */
+    /* Разрешены прерывания от нулевой ноги */
     EXTI->IMR |= EXTI_IMR_IM0;
     /* По нарастающему фронту */
     EXTI->RTSR |= EXTI_RTSR_RT0;
@@ -100,12 +114,12 @@ void init_TIM3() {
 }
 
 void init_TIM4() {
-    /* Конфигурирование каналов 1(PA6), 2(PA7) таймера 
+    /* Конфигурирование каналов 1(PB6), 2(PB7) таймера 
      * 01 - канал на вход */
     TIM4->CCMR1 |= TIM_CCMR1_CC1S_0 | TIM_CCMR1_CC2S_0;
     TIM4->CCMR1 &= ~TIM_CCMR1_CC1S_1 & ~TIM_CCMR1_CC2S_1;
     /* Режим работы энкодера */
-    TIM4->SMCR |=  TIM_SMCR_SMS_1 | TIM_SMCR_SMS_0;
+    TIM4->SMCR |=  TIM_SMCR_SMS_0;
     /* Для прерывыния необходимо сигнал TI1 снять триггером */
     TIM4->SMCR |= TIM_SMCR_TS_2;
     TIM4->DIER |= TIM_DIER_TIE;
