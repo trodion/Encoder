@@ -3,8 +3,18 @@
 #define START (TIM3->CCR3 = 70)
 #define STOP (TIM3->CCR3 = 0)
 
+#define sound TIM2->CCR4 = 5000;\
+        msDelay(1000);\
+        TIM2->CCR4 = 0;\
+        msDelay(1000);\
+        TIM2->CCR4 = 5000;\
+        msDelay(1000);\
+        TIM2->CCR4 = 0;\
+
+
 void init_pin(); /* Настройка пинов */
 void init_NVIC(); /* Система прерываний */
+void init_TIM2(); /* Звуковой сигнал */
 void init_TIM3(); /* Формирование PWM для управления двигателем */
 void init_TIM4(); /* Счет испульсов от энкодера */
 void msDelay(uint32_t ms); /* Функция задержки */
@@ -24,8 +34,23 @@ void EXTI0_IRQHandler() {
 }
 
 void TIM4_IRQHandler() {
-    TIM3->CCR3 = TIM4->CNT;
-    send_byte(TIM3->CCR3);
+    static uint8_t direction = 0; // Направление движения энкодера (0 - по часовой; 0xFF - против часовой)
+    static uint8_t prev = 70; // Предыдущее значение TIM3->CCR3 (т.е. подаваемого на DC-мотор напряжения)
+    uint8_t cur = TIM4->CNT; // Текущее напряжение на DC-моторе
+    
+    if (cur > 75){
+        sound;
+        TIM4->CNT = prev;
+        TIM4->SR &= ~TIM_SR_TIF;
+        return;
+    }
+    else if ((cur == 69 && prev == 70) || cur == prev) direction = ~direction;
+    if (cur <= 55) sound;
+    TIM3->CCR3 = cur;
+    prev = cur;
+
+    //send_byte(TIM3->CCR3);
+    //send_byte(direction);
     GPIOC->ODR ^= GPIO_ODR_ODR9;
     msDelay(150);
     // Сбросить флаг прерывания
@@ -35,19 +60,21 @@ void TIM4_IRQHandler() {
 int main(void) {
     // Включение тактирования портов B, C, AFIOEN
     RCC->APB2ENR |= RCC_APB2ENR_IOPBEN | RCC_APB2ENR_IOPCEN | RCC_APB2ENR_AFIOEN;
-    // Включение тактирования TIM3, TIM4, USART3 
-    RCC->APB1ENR |= RCC_APB1ENR_TIM3EN | RCC_APB1ENR_TIM4EN | RCC_APB1ENR_USART3EN;
+    // Включение тактирования TIM2, TIM3, TIM4, USART3 
+    RCC->APB1ENR |= RCC_APB1ENR_TIM2EN | RCC_APB1ENR_TIM3EN | RCC_APB1ENR_TIM4EN | RCC_APB1ENR_USART3EN;
     
     init_pin();
     init_UART();
     init_NVIC();
+    init_TIM2();
     init_TIM3();
     init_TIM4();
-
+    
+    //sound;
     START;
 
     while(1) {
-
+        
     }
     return 0;
 }
@@ -75,10 +102,16 @@ void init_pin() {
     /* PB10(TxD) - передающий канал, AF PP */
     GPIOB->CRH |= GPIO_CRH_CNF10_1 | GPIO_CRH_MODE10_1 | GPIO_CRH_MODE10_0;
     GPIOB->CRH &= ~GPIO_CRH_CNF10_0;
+
+    /* PB11 - Alternative Function Push-Pull,  TIM2_Ch4 */
+    GPIOB->CRH |= GPIO_CRH_CNF11_1 | GPIO_CRH_MODE11_1 | GPIO_CRH_MODE11_0;
+    GPIOB->CRH &= ~GPIO_CRH_CNF11_0;
+
+    AFIO->MAPR |= AFIO_MAPR_TIM2_REMAP_FULLREMAP;
 }
 
 void init_NVIC() {
-        /* Разрешены прерывания от нулевой ноги */
+    /* Разрешены прерывания от нулевой ноги */
     EXTI->IMR |= EXTI_IMR_IM0;
     /* По нарастающему фронту */
     EXTI->RTSR |= EXTI_RTSR_RT0;
@@ -90,22 +123,30 @@ void init_NVIC() {
     NVIC_EnableIRQ(TIM4_IRQn);
 }
 
+void init_TIM2() {
+    TIM2->ARR = 10000;
+    TIM2->CCR4 = 0;
+    TIM2->CCER |= TIM_CCER_CC4E; // включение выхода канала 1
+    TIM2->CCMR2 |= TIM_CCMR2_OC4M_2 | TIM_CCMR2_OC4M_1; // режим 2 PWM
+    TIM2->CR1 |= TIM_CR1_CEN;
+}
+
 void init_TIM3() {
     //TIM3->PSC = 7999;
     TIM3->ARR = 100;
-    TIM3->CCR3 = 0;
+    TIM3->CCR3 = 70;
     TIM3->CCER |= TIM_CCER_CC3E; // включение выхода канала 3
     TIM3->CCMR2 |= TIM_CCMR2_OC3M_2 | TIM_CCMR2_OC3M_1; // режим 2 PWM
     TIM3->CR1 |= TIM_CR1_CEN;
 }
 
 void init_TIM4() {
-    /* Конфигурирование каналов 1(PA6), 2(PA7) таймера 
+    /* Конфигурирование каналов 1(PB6), 2(PB7) таймера 
      * 01 - канал на вход */
     TIM4->CCMR1 |= TIM_CCMR1_CC1S_0 | TIM_CCMR1_CC2S_0;
     TIM4->CCMR1 &= ~TIM_CCMR1_CC1S_1 & ~TIM_CCMR1_CC2S_1;
     /* Режим работы энкодера */
-    TIM4->SMCR |=  TIM_SMCR_SMS_1 | TIM_SMCR_SMS_0;
+    TIM4->SMCR |=  TIM_SMCR_SMS_0;
     /* Для прерывыния необходимо сигнал TI1 снять триггером */
     TIM4->SMCR |= TIM_SMCR_TS_2;
     TIM4->DIER |= TIM_DIER_TIE;
